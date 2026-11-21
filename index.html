@@ -1,0 +1,1041 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interactive 3D Cell</title>
+<meta name="description" content="An interactive 3D model of the inside of an animal cell, built with three.js.">
+<style>
+  :root {
+    --bg: #060b16;
+    --panel: rgba(12, 20, 38, 0.78);
+    --panel-solid: #0c1426;
+    --border: rgba(140, 170, 255, 0.18);
+    --text: #e6ecff;
+    --muted: #93a0c2;
+    --accent: #7ee0ff;
+    --good: #6ee7a8;
+    --bad: #ff8a8a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(ellipse at 50% 42%, #15244a 0%, #0a1226 45%, var(--bg) 80%);
+    color: var(--text);
+    font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; touch-action: none; }
+  #labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .label {
+    position: absolute; left: 0; top: 0; white-space: nowrap;
+    font-size: 12px; font-weight: 600; letter-spacing: .01em;
+    padding: 2px 9px 2px 7px; border-radius: 999px;
+    background: rgba(6, 12, 26, .82); border: 1px solid var(--c);
+    display: flex; align-items: center; gap: 6px;
+    transform: translate(-50%, -140%);
+  }
+  .label::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+
+  .topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 5;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 12px 16px; pointer-events: none;
+  }
+  .topbar > * { pointer-events: auto; }
+  .title h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.01em; }
+  .title p { margin: 0; color: var(--muted); font-size: 12px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .btn {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 6px 11px; font-size: 13px; backdrop-filter: blur(8px);
+    transition: border-color .15s, background .15s;
+  }
+  .btn:hover { border-color: rgba(126, 224, 255, .5); }
+  .btn[aria-pressed="true"] { background: rgba(126, 224, 255, .16); border-color: rgba(126, 224, 255, .6); color: #dff8ff; }
+  .btn.primary { background: rgba(126, 224, 255, .2); border-color: rgba(126, 224, 255, .6); }
+
+  .panel {
+    position: fixed; z-index: 4; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; backdrop-filter: blur(10px);
+  }
+  #list { left: 16px; top: 76px; width: 232px; max-height: calc(100% - 120px); overflow: auto; padding: 8px; }
+  #list h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 4px 8px 6px; }
+  .row { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
+  .row.active { background: rgba(126, 224, 255, .12); }
+  .row .name { flex: 1; display: flex; align-items: center; gap: 8px; text-align: left; background: none; border: 0; padding: 5px 6px; border-radius: 8px; }
+  .row .name:hover { background: rgba(255, 255, 255, .05); }
+  .row .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; box-shadow: 0 0 8px var(--c); background: var(--c); }
+  .row.hidden .name { opacity: .4; }
+  .eye { background: none; border: 0; padding: 4px 6px; border-radius: 6px; color: var(--muted); font-size: 13px; }
+  .eye:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
+  #list .foot { display: flex; gap: 6px; padding: 8px 4px 2px; }
+  #list .foot .btn { flex: 1; font-size: 12px; padding: 5px 6px; }
+
+  #info { right: 16px; top: 76px; width: 330px; max-height: calc(100% - 120px); overflow: auto; padding: 16px 18px; }
+  #info .kicker { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  #info .kicker .dot { width: 10px; height: 10px; border-radius: 50%; }
+  #info h2 { margin: 4px 0 2px; font-size: 21px; letter-spacing: -.01em; }
+  #info .size { margin: 0 0 10px; color: var(--accent); font-size: 12px; }
+  #info h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 14px 0 6px; }
+  #info ul { margin: 0; padding-left: 18px; }
+  #info li { margin-bottom: 5px; }
+  #info p { margin: 0 0 8px; }
+  #info .actions { display: flex; gap: 8px; margin-top: 14px; }
+  #info .hint { color: var(--muted); font-size: 13px; }
+  kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+
+  #tooltip {
+    position: fixed; z-index: 6; pointer-events: none; padding: 4px 10px; border-radius: 8px;
+    background: rgba(6, 12, 26, .9); border: 1px solid var(--border); font-size: 12px; font-weight: 600;
+    opacity: 0; transition: opacity .12s; white-space: nowrap;
+  }
+  #quizbar {
+    position: fixed; z-index: 6; left: 50%; bottom: 20px; transform: translateX(-50%);
+    display: none; align-items: center; gap: 12px; padding: 10px 14px; max-width: calc(100% - 32px);
+  }
+  #quizbar.on { display: flex; }
+  #quizbar .q { font-size: 15px; }
+  #quizbar .q b { color: var(--accent); }
+  #quizbar .score { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #quizbar .fb { font-weight: 600; min-width: 0; }
+  #quizbar .fb.good { color: var(--good); } #quizbar .fb.bad { color: var(--bad); }
+  .note { position: fixed; left: 16px; bottom: 12px; z-index: 3; color: var(--muted); font-size: 11px; pointer-events: none; }
+
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10; color: var(--muted); background: var(--bg); transition: opacity .5s; text-align: center; padding: 16px; }
+  #loading.done { opacity: 0; pointer-events: none; }
+  #toggleList { display: none; }
+
+  @media (max-width: 820px) {
+    .topbar { flex-direction: column; align-items: stretch; gap: 8px; }
+    .tools { justify-content: flex-start; }
+    .title p { display: none; }
+    #toggleList { display: inline-block; }
+    #list { top: 112px; display: none; width: min(260px, calc(100% - 32px)); max-height: calc(100% - 200px); }
+    #list.open { display: block; }
+    #info { left: 16px; right: 16px; top: auto; bottom: 16px; width: auto; max-height: 42%; }
+    #info.empty { display: none; }
+    .note { display: none; }
+    #quizbar { bottom: auto; top: 112px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="labels"></div>
+
+<header class="topbar">
+  <div class="title">
+    <h1>Inside an Animal Cell</h1>
+    <p>Drag to rotate · scroll or pinch to zoom · click any structure to explore</p>
+  </div>
+  <div class="tools">
+    <button class="btn" id="toggleList">Organelles</button>
+    <button class="btn" id="btnCut" aria-pressed="true" title="Cut a wedge out of the membrane and nucleus">Cutaway</button>
+    <button class="btn" id="btnLabels" aria-pressed="false">Labels</button>
+    <button class="btn" id="btnMotion" aria-pressed="true">Motion</button>
+    <button class="btn" id="btnQuiz">Quiz me</button>
+    <button class="btn" id="btnReset">Reset view</button>
+  </div>
+</header>
+
+<nav id="list" class="panel" aria-label="Organelles"></nav>
+<aside id="info" class="panel empty" aria-live="polite"></aside>
+<div id="tooltip"></div>
+<div id="quizbar" class="panel">
+  <span class="q"></span><span class="fb"></span><span class="score"></span>
+  <button class="btn" id="quizSkip">Skip</button>
+  <button class="btn" id="quizEnd">End</button>
+</div>
+<div class="note">Schematic — structures are not to scale.</div>
+<div id="loading">Building the cell…</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------------------------------------------------------------- data
+const ORG = {
+  membrane: {
+    name: 'Plasma membrane', group: 'Boundary', color: '#f2a7c0', focus: 30,
+    size: '≈ 7–10 nm thick',
+    desc: 'A flexible phospholipid bilayer studded with proteins and cholesterol that wraps the whole cell. It is selectively permeable: small non-polar molecules slip through, while ions and larger molecules need channels, carriers or pumps (the darker pegs).',
+    facts: [
+      'Described by the fluid-mosaic model (Singer & Nicolson, 1972) — lipids and many proteins drift sideways within the layer.',
+      'Proteins make up roughly half of the membrane’s mass.',
+      'Sugar chains on the outer face (the glycocalyx) let cells recognise one another.',
+    ],
+  },
+  nucleus: {
+    name: 'Nucleus', group: 'Nucleus', color: '#8e7cc3', focus: 15,
+    size: '≈ 5–10 µm across',
+    desc: 'The control centre. A double-membrane nuclear envelope, perforated by nuclear pores (the rings on its surface), encloses the chromosomes. DNA is copied and transcribed into RNA here.',
+    facts: [
+      'A single human nucleus packs about 2 metres of DNA.',
+      'Thousands of nuclear pore complexes gate traffic: RNA out, proteins in.',
+      'The outer nuclear membrane is continuous with the rough ER.',
+    ],
+  },
+  chromatin: {
+    name: 'Chromatin', group: 'Nucleus', color: '#c9a0ff', focus: 10,
+    size: 'DNA double helix ≈ 2 nm wide',
+    desc: 'DNA wound around histone proteins. Between divisions it stays as loose threads; before mitosis it condenses into the familiar X-shaped chromosomes.',
+    facts: [
+      'DNA wraps about 1.65 turns (147 base pairs) around each histone core to form a nucleosome — “beads on a string”.',
+      'Loosely packed euchromatin is usually active; dense heterochromatin is mostly silenced.',
+      'Humans have 46 chromosomes holding roughly 6 billion base pairs.',
+    ],
+  },
+  nucleolus: {
+    name: 'Nucleolus', group: 'Nucleus', color: '#5b3c99', focus: 9,
+    size: '≈ 1–3 µm',
+    desc: 'A dense region inside the nucleus where ribosomal RNA is transcribed and assembled with proteins into ribosome subunits, which are then exported through the nuclear pores.',
+    facts: [
+      'It has no membrane — it forms by phase separation around clusters of rRNA genes.',
+      'It breaks down during mitosis and re-forms afterwards.',
+      'Fast-growing cells often have large or multiple nucleoli.',
+    ],
+  },
+  rer: {
+    name: 'Rough endoplasmic reticulum', group: 'Endomembrane system', color: '#6fb7e8', focus: 13,
+    size: 'Often over half of a cell’s membrane',
+    desc: 'Stacked, flattened membrane sheets studded with ribosomes. Proteins bound for secretion, membranes or lysosomes are made here and threaded into the ER, where they fold and get their first sugar tags.',
+    facts: [
+      'Continuous with the outer membrane of the nuclear envelope.',
+      'Especially abundant in secretory cells such as pancreatic and antibody-producing plasma cells.',
+      'A build-up of misfolded proteins triggers the “unfolded protein response”.',
+    ],
+  },
+  ser: {
+    name: 'Smooth endoplasmic reticulum', group: 'Endomembrane system', color: '#9be07f', focus: 9,
+    size: 'Tubules ≈ 30–60 nm wide',
+    desc: 'A ribosome-free network of tubules that makes lipids and steroid hormones, detoxifies drugs and stores calcium ions.',
+    facts: [
+      'Liver cells expand their smooth ER when exposed to drugs such as barbiturates.',
+      'In muscle it is called the sarcoplasmic reticulum and releases the Ca²⁺ that triggers contraction.',
+      'Makes most of the phospholipids for the cell’s membranes.',
+    ],
+  },
+  golgi: {
+    name: 'Golgi apparatus', group: 'Endomembrane system', color: '#f5c542', focus: 9,
+    size: 'Stack ≈ 1–3 µm',
+    desc: 'A stack of flattened sacs (cisternae). Cargo from the ER enters at the cis face (toward the nucleus), is modified — e.g. glycosylated — and sorted, then leaves the trans face in vesicles.',
+    facts: [
+      'Described by Camillo Golgi in 1898.',
+      'Animal cells typically have 4–8 cisternae per stack.',
+      'It tags lysosomal enzymes with mannose-6-phosphate so they get delivered to lysosomes.',
+    ],
+  },
+  mito: {
+    name: 'Mitochondria', group: 'Energy', color: '#ff7a59', focus: 6,
+    size: '≈ 0.5–1 µm wide, 1–2+ µm long',
+    desc: 'Double-membraned powerhouses. The folded inner membrane (cristae) carries the electron transport chain and ATP synthase, which make most of the cell’s ATP by oxidative phosphorylation.',
+    facts: [
+      'They carry their own circular DNA — 16,569 base pairs and 37 genes in humans.',
+      'Descended from a bacterium engulfed over a billion years ago (endosymbiosis).',
+      'Inherited almost entirely from the mother.',
+      'They also trigger programmed cell death by releasing cytochrome c.',
+    ],
+  },
+  lysosome: {
+    name: 'Lysosomes', group: 'Degradation & detox', color: '#d06fe0', focus: 5,
+    size: '≈ 0.1–1 µm',
+    desc: 'Acidic sacs (pH ≈ 4.5–5) filled with digestive enzymes that break down worn-out organelles, engulfed particles and large molecules for recycling.',
+    facts: [
+      'Contain around 50–60 different hydrolytic enzymes.',
+      'Discovered by Christian de Duve, who shared the 1974 Nobel Prize.',
+      'Missing enzymes cause lysosomal storage diseases such as Tay–Sachs.',
+    ],
+  },
+  peroxisome: {
+    name: 'Peroxisomes', group: 'Degradation & detox', color: '#5fd3b3', focus: 5,
+    size: '≈ 0.1–1 µm',
+    desc: 'Small single-membrane organelles that break down very-long-chain fatty acids and neutralise the hydrogen peroxide this produces using the enzyme catalase.',
+    facts: [
+      'The crystalline core seen in many species is the enzyme urate oxidase.',
+      'They make plasmalogens, lipids abundant in the myelin around nerves.',
+      'Unlike mitochondria, they can import fully folded proteins.',
+    ],
+  },
+  ribosome: {
+    name: 'Ribosomes', group: 'Protein synthesis', color: '#4f74e3', focus: 5,
+    size: '≈ 25–30 nm',
+    desc: 'Molecular machines of RNA and protein that translate mRNA into protein. Free ribosomes (scattered dots) make cytosolic proteins; ribosomes on the rough ER make secreted and membrane proteins.',
+    facts: [
+      'The eukaryotic 80S ribosome is built from a large 60S and a small 40S subunit.',
+      'Its RNA, not its protein, forms peptide bonds — the ribosome is a ribozyme.',
+      'A growing mammalian cell can hold millions of ribosomes.',
+    ],
+  },
+  vesicle: {
+    name: 'Transport vesicles', group: 'Endomembrane system', color: '#ffd98a', focus: 7,
+    size: '≈ 50–100 nm',
+    desc: 'Small membrane bubbles that carry cargo between compartments — ER to Golgi, Golgi to the cell surface — and bring material in by endocytosis. With Motion on, watch them bud off the Golgi and travel to the membrane.',
+    facts: [
+      'Coat proteins (COPII, COPI, clathrin) shape vesicles and select their cargo.',
+      'SNARE proteins zip vesicles onto their target membrane to fuse.',
+      'Fusing with the plasma membrane to release cargo is called exocytosis.',
+    ],
+  },
+  centrosome: {
+    name: 'Centrosome', group: 'Cytoskeleton', color: '#7ee0ff', focus: 4.5,
+    size: 'Centriole ≈ 0.25 µm × 0.5 µm',
+    desc: 'The main microtubule-organising centre: two centrioles set at right angles inside a cloud of pericentriolar material, from which microtubules grow. It duplicates once per cycle to form the two poles of the mitotic spindle.',
+    facts: [
+      'Each centriole is a barrel of 9 microtubule triplets — zoom in to count them.',
+      'Most plant cells have no centrioles.',
+      'Centrioles also act as basal bodies that build cilia and flagella.',
+    ],
+  },
+  cytoskeleton: {
+    name: 'Microtubules', group: 'Cytoskeleton', color: '#d9f2e6', focus: 16,
+    size: '≈ 25 nm wide',
+    desc: 'Hollow protein tubes radiating from the centrosome. They give the cell shape and act as tracks for motor proteins — kinesin and dynein — that haul vesicles and organelles.',
+    facts: [
+      'The cytoskeleton also includes actin filaments (≈ 7 nm) and intermediate filaments (≈ 10 nm).',
+      'Microtubules constantly grow and shrink — “dynamic instability”.',
+      'Kinesin walks along them in 8 nm steps, burning one ATP per step.',
+    ],
+  },
+};
+const KEYS = Object.keys(ORG);
+
+// ---------------------------------------------------------------- seeded random
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rand = mulberry32(20261121);
+const rr = (a, b) => a + (b - a) * rand();
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+const randDir = () => { const u = rr(-1, 1), t = rr(0, Math.PI * 2), s = Math.sqrt(1 - u * u); return V(s * Math.cos(t), u, s * Math.sin(t)); };
+const randQuat = () => new THREE.Quaternion().setFromAxisAngle(randDir(), rr(0, Math.PI * 2));
+
+// ---------------------------------------------------------------- renderer / scene
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.05, 300);
+const HOME_POS = V(16, 9, 20), HOME_TARGET = V(0, 0, 0);
+camera.position.copy(HOME_POS);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 2;
+controls.maxDistance = 55;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.35;
+
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x2a3350, 1.15));
+const key = new THREE.DirectionalLight(0xffffff, 1.7); key.position.set(12, 16, 14); scene.add(key);
+const rim = new THREE.DirectionalLight(0x8fb0ff, 0.7); rim.position.set(-14, -6, -12); scene.add(rim);
+const fill = new THREE.PointLight(0xffe0f0, 30, 30, 2); fill.position.set(2, 2, 6); scene.add(fill);
+
+const cell = new THREE.Group();
+scene.add(cell);
+
+// ---------------------------------------------------------------- registry
+const reg = Object.fromEntries(KEYS.map(k => [k, { objects: [], materials: [], anchor: V(), visible: true }]));
+function mat(k, opts = {}) {
+  const m = new THREE.MeshStandardMaterial({ color: ORG[k].color, roughness: 0.55, metalness: 0.0, ...opts });
+  m.userData.baseEmissive = m.emissive.clone();
+  m.userData.baseEI = m.emissiveIntensity;
+  reg[k].materials.push(m);
+  return m;
+}
+function add(k, obj, parent = cell) {
+  obj.traverse(o => { o.userData.key = k; });
+  reg[k].objects.push(obj);
+  parent.add(obj);
+  return obj;
+}
+const translucent = (opacity) => ({ transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide });
+
+// ---------------------------------------------------------------- geometry helpers
+const R = 10;                 // cell radius
+const N = V(0, 0.4, 0);       // nucleus centre
+const NR = 3.2;               // nucleus radius
+const WEDGE_A = Math.atan2(0.8, 0.6), WEDGE_HALF = Math.PI / 4;
+const PHI_START = Math.PI - WEDGE_A + WEDGE_HALF, PHI_LEN = Math.PI * 1.5;
+function inWedge(v) { let a = Math.atan2(v.z, v.x) - WEDGE_A; a = Math.atan2(Math.sin(a), Math.cos(a)); return Math.abs(a) < WEDGE_HALF; }
+const spherePt = (r, phi, theta) => V(-r * Math.cos(phi) * Math.sin(theta), r * Math.cos(theta), r * Math.sin(phi) * Math.sin(theta));
+
+function deform(geo, fn, normals = true) {
+  const p = geo.attributes.position, v = V();
+  for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); fn(v); p.setXYZ(i, v.x, v.y, v.z); }
+  p.needsUpdate = true;
+  if (normals) geo.computeVertexNormals();
+  return geo;
+}
+const membraneWob = d => 1 + 0.018 * (Math.sin(2.3 * d.x * 3 + 1.1) * Math.sin(1.9 * d.y * 3 + 0.4) + 0.6 * Math.sin(2.7 * d.z * 3 + 2.0));
+const rerWob = d => 1 + 0.035 * Math.sin(9 * d.x + 3 * d.y) * Math.cos(8 * d.z - 2 * d.y);
+function wobSphere(r, cut, ws, hs, wob) {
+  const g = new THREE.SphereGeometry(r, ws, hs, cut ? PHI_START : 0, cut ? PHI_LEN : Math.PI * 2);
+  return deform(g, v => v.multiplyScalar(wob(v.clone().normalize())), false);
+}
+function segDist(a, b, p) {
+  const ab = b.clone().sub(a);
+  const t = THREE.MathUtils.clamp(p.clone().sub(a).dot(ab) / ab.lengthSq(), 0, 1);
+  return a.clone().addScaledVector(ab, t).distanceTo(p);
+}
+
+const camDir = HOME_POS.clone().normalize();
+const bestFacing = (ps) => ps.reduce((a, b) => (b.dot(camDir) > a.dot(camDir) ? b : a));
+
+// Shells that swap between full and cut-away geometry
+const cutables = [];
+function cutShell(k, r, center, material, wob, ws = 96, hs = 64) {
+  const full = wobSphere(r, false, ws, hs, wob), cut = wobSphere(r, true, ws, hs, wob);
+  const mesh = new THREE.Mesh(cut, material);
+  mesh.position.copy(center);
+  mesh.userData.geos = { full, cut };
+  cutables.push(mesh);
+  return add(k, mesh);
+}
+// Instanced surface decorations whose wedge members hide when cut
+const wedgeInstanced = [];
+function surfaceInstances(k, geo, material, center, items) {
+  const mesh = new THREE.InstancedMesh(geo, material, items.length);
+  mesh.position.copy(center);
+  mesh.userData.items = items;
+  wedgeInstanced.push(mesh);
+  return add(k, mesh);
+}
+const tmpM = new THREE.Matrix4(), ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+function applyCut(cutOn) {
+  for (const m of cutables) m.geometry = cutOn ? m.userData.geos.cut : m.userData.geos.full;
+  for (const m of wedgeInstanced) {
+    m.userData.items.forEach((it, i) => m.setMatrixAt(i, cutOn && it.wedge ? ZERO : it.matrix));
+    m.instanceMatrix.needsUpdate = true;
+    m.computeBoundingSphere();
+  }
+}
+
+// ---------------------------------------------------------------- plasma membrane
+{
+  const outer = mat('membrane', { ...translucent(0.3), roughness: 0.3, emissive: new THREE.Color('#3a1424') });
+  const inner = mat('membrane', { ...translucent(0.18), roughness: 0.4, color: '#ffc9da' });
+  outer.userData.baseEmissive = outer.emissive.clone();
+  const o = cutShell('membrane', R, V(), outer, membraneWob);
+  const i = cutShell('membrane', R - 0.2, V(), inner, membraneWob);
+  o.renderOrder = 10; i.renderOrder = 9;
+
+  const items = [];
+  for (let n = 0; n < 320; n++) {
+    const d = randDir();
+    const p = d.clone().multiplyScalar((R - 0.1) * membraneWob(d));
+    const q = new THREE.Quaternion().setFromUnitVectors(V(0, 1, 0), d);
+    const s = rr(0.7, 1.4);
+    items.push({ wedge: inWedge(p), matrix: new THREE.Matrix4().compose(p, q, V(s, rr(0.8, 1.15), s)) });
+  }
+  surfaceInstances('membrane', new THREE.CapsuleGeometry(0.1, 0.16, 3, 8), mat('membrane', { color: '#d9628d', roughness: 0.45 }), V(), items);
+  reg.membrane.anchor.copy(V(-0.45, 0.75, 0.48).normalize().multiplyScalar(R));
+}
+
+// ---------------------------------------------------------------- nucleus
+const nuc = {};
+{
+  const env = mat('nucleus', { ...translucent(0.55), roughness: 0.35 });
+  const envIn = mat('nucleus', { ...translucent(0.35), color: '#b9a8ee' });
+  const plasm = mat('nucleus', { color: '#2c2150', side: THREE.BackSide, roughness: 0.9, transparent: true, opacity: 0.85 });
+  const nw = d => 1 + 0.02 * Math.sin(5 * d.x + 2 * d.z) * Math.cos(4 * d.y);
+  cutShell('nucleus', NR, N, env, nw, 72, 48).renderOrder = 6;
+  cutShell('nucleus', NR - 0.14, N, envIn, nw, 72, 48).renderOrder = 5;
+  cutShell('nucleus', NR - 0.2, N, plasm, nw, 72, 48);
+
+  const items = [];
+  for (let n = 0; n < 170; n++) {
+    const d = randDir();
+    const p = d.clone().multiplyScalar((NR - 0.04) * nw(d));
+    const q = new THREE.Quaternion().setFromUnitVectors(V(0, 0, 1), d);
+    items.push({ wedge: inWedge(p), matrix: new THREE.Matrix4().compose(p, q, V(1, 1, 1)) });
+  }
+  surfaceInstances('nucleus', new THREE.TorusGeometry(0.15, 0.055, 6, 14), mat('nucleus', { color: '#5e4ea0', roughness: 0.4 }), N, items);
+  reg.nucleus.anchor.copy(N).add(V(0, NR + 0.1, 0));
+
+  // nucleolus — sits in the cut-open side so it's visible
+  const wedgeDir = V(Math.cos(WEDGE_A), 0, Math.sin(WEDGE_A));
+  const nlPos = N.clone().addScaledVector(wedgeDir, 0.9).add(V(0, 0.35, 0));
+  const nlGeo = deform(new THREE.IcosahedronGeometry(1.05, 5), v => v.multiplyScalar(1 + 0.07 * Math.sin(6 * v.x) * Math.sin(5 * v.y + 1) * Math.sin(7 * v.z)));
+  const nl = new THREE.Mesh(nlGeo, mat('nucleolus', { roughness: 0.75, emissive: new THREE.Color('#1a0f33') }));
+  nl.position.copy(nlPos);
+  add('nucleolus', nl);
+  const spots = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.16, 1), mat('nucleolus', { color: '#9b7ad8' }), 18);
+  for (let n = 0; n < 18; n++) spots.setMatrixAt(n, tmpM.compose(randDir().multiplyScalar(rr(0.9, 1.02)), new THREE.Quaternion(), V(1, 1, 1)));
+  spots.position.copy(nlPos);
+  add('nucleolus', spots);
+  reg.nucleolus.anchor.copy(nlPos).add(V(0, 1.1, 0));
+  nuc.nucleolus = nlPos;
+
+  // chromatin — tangled random-walk threads
+  const cmat = mat('chromatin', { roughness: 0.5, emissive: new THREE.Color('#2b1450') });
+  const chromo = new THREE.Group();
+  for (let s = 0; s < 9; s++) {
+    let p = randDir().multiplyScalar(rr(0.6, 2.2));
+    const pts = [p.clone()];
+    for (let j = 0; j < 22; j++) {
+      p = p.clone().add(randDir().multiplyScalar(0.75));
+      if (p.length() > NR - 0.5) p.setLength(NR - 0.6);
+      if (p.clone().add(N).distanceTo(nlPos) < 1.15) p.add(N.clone().add(p).sub(nlPos).setLength(0.6));
+      pts.push(p.clone());
+    }
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 160, 0.055, 6), cmat);
+    chromo.add(tube);
+  }
+  chromo.position.copy(N);
+  add('chromatin', chromo);
+  reg.chromatin.anchor.copy(N).add(V(Math.cos(WEDGE_A) * 1.8, -1.0, Math.sin(WEDGE_A) * 1.8));
+  nuc.chromatin = chromo;
+}
+
+// ---------------------------------------------------------------- rough ER (sheets wrapped around the nucleus)
+{
+  const rerMat = mat('rer', { side: THREE.DoubleSide, roughness: 0.5, transparent: true, opacity: 0.92 });
+  const riboMat = mat('ribosome', { roughness: 0.4 });
+  const riboPts = [];
+  const radii = [3.75, 4.15, 4.55];
+  radii.forEach((r, ri) => {
+    const nP = 4, span = PHI_LEN - 0.2, each = span / nP;
+    for (let k = 0; k < nP; k++) {
+      const p0 = PHI_START + 0.1 + k * each + rr(0.04, 0.12) + ri * 0.07;
+      const pl = each - 0.18 - rr(0, 0.1);
+      const t0 = rr(0.35, 0.7), tl = Math.PI - t0 - rr(0.35, 0.7);
+      const g = new THREE.SphereGeometry(r, Math.ceil(pl * 20), Math.ceil(tl * 16), p0, pl, t0, tl);
+      deform(g, v => v.multiplyScalar(rerWob(v.clone().normalize())));
+      const m = new THREE.Mesh(g, rerMat);
+      m.position.copy(N);
+      add('rer', m);
+      const count = Math.round(pl * tl * r * r * 5.5);
+      for (let n = 0; n < count; n++) {
+        const pt = spherePt(r, rr(p0, p0 + pl), rr(t0, t0 + tl));
+        const d = pt.clone().normalize();
+        pt.multiplyScalar(rerWob(d)).addScaledVector(d, rand() < 0.5 ? 0.07 : -0.07).add(N);
+        riboPts.push(pt);
+      }
+    }
+  });
+  reg.rer.anchor.copy(N).add(V(-0.55, 0.55, 0.62).normalize().multiplyScalar(4.6));
+
+  // free ribosomes scattered in the cytosol
+  for (let n = 0; n < 900; n++) {
+    const p = randDir().multiplyScalar(Math.cbrt(rand()) * (R - 0.5));
+    if (p.distanceTo(N) < 4.9) { n--; continue; }
+    riboPts.push(p);
+  }
+  const freeStart = riboPts.length - 900;
+  const ribo = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.062, 0), riboMat, riboPts.length);
+  riboPts.forEach((p, i) => ribo.setMatrixAt(i, tmpM.compose(p, randQuat(), V(1, 1, 1))));
+  ribo.computeBoundingSphere();
+  add('ribosome', ribo);
+  reg.ribosome.anchor.copy(bestFacing(riboPts.slice(freeStart).filter(p => p.length() > 7 && p.length() < 8.5)));
+}
+
+// ---------------------------------------------------------------- placement bookkeeping
+const placed = [];
+const G = V(6.0, -0.6, -2.0);                 // Golgi
+const S = V(-5.6, -1.6, 2.6);                 // smooth ER
+const C = N.clone().add(V(-0.3, 0.85, 0.45).normalize().multiplyScalar(5.6)); // centrosome
+placed.push({ p: G, r: 2.6 }, { p: S, r: 2.5 }, { p: C, r: 1.1 });
+function findSpot(r) {
+  for (let i = 0; i < 6000; i++) {
+    const p = randDir().multiplyScalar(Math.cbrt(rand()) * (R - 0.8 - r));
+    if (p.distanceTo(N) < 4.95 + r) continue;
+    if (placed.some(q => q.p.distanceTo(p) < q.r + r + 0.2)) continue;
+    placed.push({ p, r });
+    return p;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- smooth ER
+{
+  const m = mat('ser', { roughness: 0.45 });
+  const grp = new THREE.Group();
+  const hubs = Array.from({ length: 7 }, () => randDir().multiplyScalar(rr(0.3, 1.9)));
+  for (let i = 0; i < 11; i++) {
+    const a = hubs[i % hubs.length], b = hubs[(i * 3 + 2) % hubs.length];
+    const pts = [a, a.clone().lerp(b, 0.33).add(randDir().multiplyScalar(0.6)), a.clone().lerp(b, 0.66).add(randDir().multiplyScalar(0.6)), b];
+    if (i > 6) pts.push(randDir().multiplyScalar(2.2));
+    grp.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, 0.13, 8), m));
+  }
+  hubs.forEach(h => { const s = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), m); s.position.copy(h); grp.add(s); });
+  grp.position.copy(S);
+  add('ser', grp);
+  reg.ser.anchor.copy(S).add(V(0, 1.6, 0));
+}
+
+// ---------------------------------------------------------------- Golgi apparatus
+const awayFromNucleus = G.clone().sub(N).normalize();
+{
+  const m = mat('golgi', { roughness: 0.45, side: THREE.DoubleSide });
+  const grp = new THREE.Group();
+  for (let i = 0; i < 6; i++) {
+    const rad = 2.0 - Math.abs(i - 2.5) * 0.2;
+    const g = new THREE.CylinderGeometry(rad, rad, 0.13, 48, 1);
+    g.scale(1, 1, 0.5);
+    g.rotateX(Math.PI / 2);
+    deform(g, v => { v.z += 0.11 * (v.x * v.x + v.y * v.y * 1.5); });
+    const plate = new THREE.Mesh(g, m);
+    plate.position.z = (i - 2.5) * 0.3;
+    grp.add(plate);
+    for (const sx of [-1, 1]) {
+      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), m);
+      tip.position.set(sx * rad, 0, plate.position.z + 0.11 * rad * rad);
+      grp.add(tip);
+    }
+  }
+  grp.position.copy(G);
+  grp.lookAt(N);
+  add('golgi', grp);
+  reg.golgi.anchor.copy(G).add(V(0, 1.5, 0));
+}
+
+// ---------------------------------------------------------------- centrosome + microtubules
+{
+  const m = mat('centrosome', { roughness: 0.35, emissive: new THREE.Color('#0d3340') });
+  const grp = new THREE.Group();
+  const rod = new THREE.CylinderGeometry(0.03, 0.03, 0.95, 6);
+  function centriole() {
+    const c = new THREE.Group();
+    for (let k = 0; k < 9; k++) for (let t = 0; t < 3; t++) {
+      const a = k * Math.PI * 2 / 9 + t * 0.1;
+      const r = 0.24 + t * 0.065;
+      const mm = new THREE.Mesh(rod, m);
+      mm.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+      c.add(mm);
+    }
+    return c;
+  }
+  const c1 = centriole(); c1.position.set(-0.3, 0, 0); grp.add(c1);
+  const c2 = centriole(); c2.rotation.z = Math.PI / 2; c2.position.set(0.45, 0.35, 0.1); grp.add(c2);
+  const pcm = new THREE.Mesh(new THREE.SphereGeometry(1.05, 24, 18), mat('centrosome', { ...translucent(0.1), color: '#9fe8ff' }));
+  grp.add(pcm);
+  grp.position.copy(C);
+  grp.quaternion.copy(randQuat());
+  add('centrosome', grp);
+  reg.centrosome.anchor.copy(C).add(V(0, 1.1, 0));
+
+  const mt = mat('cytoskeleton', { ...translucent(0.55), roughness: 0.3, emissive: new THREE.Color('#1c3329') });
+  const tubes = new THREE.Group();
+  const mids = [];
+  let made = 0;
+  for (let tries = 0; tries < 3000 && made < 40; tries++) {
+    const e = randDir().multiplyScalar(R - 0.55);
+    if (segDist(C, e, N) < 4.9) continue;
+    const mid = C.clone().lerp(e, 0.5).add(randDir().multiplyScalar(0.7));
+    if (mid.distanceTo(N) < 4.9) continue;
+    tubes.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([C.clone(), mid, e]), 28, 0.032, 5), mt));
+    mids.push(mid);
+    made++;
+  }
+  add('cytoskeleton', tubes);
+  reg.cytoskeleton.anchor.copy(bestFacing(mids));
+}
+
+// ---------------------------------------------------------------- mitochondria
+const mitos = [];
+{
+  const outer = mat('mito', { ...translucent(0.42), roughness: 0.35 });
+  const matrix = mat('mito', { ...translucent(0.22), color: '#ffc2a8' });
+  const crista = mat('mito', { color: '#e2502f', roughness: 0.5 });
+  const outerGeo = new THREE.CapsuleGeometry(0.44, 1.45, 8, 20);
+  const innerGeo = new THREE.CapsuleGeometry(0.37, 1.4, 6, 16);
+  const cGeo = new THREE.BoxGeometry(0.5, 0.045, 0.6);
+  for (let i = 0; i < 17; i++) {
+    const p = findSpot(1.2);
+    if (!p) break;
+    const g = new THREE.Group();
+    const o = new THREE.Mesh(outerGeo, outer); o.renderOrder = 3; g.add(o);
+    g.add(new THREE.Mesh(innerGeo, matrix));
+    for (let j = 0; j < 7; j++) {
+      const c = new THREE.Mesh(cGeo, crista);
+      c.position.set(j % 2 ? 0.12 : -0.12, -0.78 + j * 0.26, 0);
+      g.add(c);
+    }
+    g.position.copy(p);
+    g.quaternion.copy(randQuat());
+    const s = rr(0.85, 1.15); g.scale.setScalar(s);
+    g.userData.spin = rr(-0.25, 0.25);
+    add('mito', g);
+    mitos.push(g);
+  }
+  reg.mito.anchor.copy(bestFacing(mitos.map(m => m.position))).add(V(0, 0.9, 0));
+}
+
+// ---------------------------------------------------------------- lysosomes & peroxisomes
+const drifters = [];
+{
+  const lm = mat('lysosome', { roughness: 0.3, emissive: new THREE.Color('#2a0b30') });
+  const lgeo = deform(new THREE.IcosahedronGeometry(1, 3), v => v.multiplyScalar(1 + 0.05 * Math.sin(5 * v.x + 2 * v.y)));
+  const lps = [];
+  for (let i = 0; i < 10; i++) {
+    const r = rr(0.35, 0.55);
+    const p = findSpot(r);
+    if (!p) break;
+    const l = new THREE.Mesh(lgeo, lm);
+    l.position.copy(p); l.scale.setScalar(r);
+    add('lysosome', l); drifters.push(l); lps.push(p);
+  }
+  reg.lysosome.anchor.copy(bestFacing(lps)).add(V(0, 0.6, 0));
+
+  const pm = mat('peroxisome', { ...translucent(0.5), roughness: 0.3 });
+  const core = mat('peroxisome', { color: '#1f8f78', roughness: 0.3, metalness: 0.2 });
+  const pps = [];
+  for (let i = 0; i < 9; i++) {
+    const r = rr(0.3, 0.42);
+    const p = findSpot(r);
+    if (!p) break;
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(1, 24, 18), pm));
+    const c = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.75, 0.75), core);
+    c.rotation.set(0.6, 0.8, 0.2); g.add(c);
+    g.position.copy(p); g.scale.setScalar(r);
+    add('peroxisome', g); drifters.push(g); pps.push(p);
+  }
+  reg.peroxisome.anchor.copy(bestFacing(pps)).add(V(0, 0.5, 0));
+  drifters.forEach(d => { d.userData.home = d.position.clone(); d.userData.ph = rr(0, 10); });
+}
+
+// ---------------------------------------------------------------- vesicles (static + travelling)
+const movers = [];
+{
+  const vm = mat('vesicle', { roughness: 0.3, emissive: new THREE.Color('#2e2208') });
+  const vgeo = new THREE.SphereGeometry(1, 16, 12);
+  const side = V().crossVectors(awayFromNucleus, V(0, 1, 0)).normalize();
+  const up = V().crossVectors(side, awayFromNucleus).normalize();
+  const vps = [];
+  for (let i = 0; i < 18; i++) {
+    const p = G.clone().addScaledVector(awayFromNucleus, rr(1.1, 1.9)).addScaledVector(side, rr(-1.8, 1.8)).addScaledVector(up, rr(-0.9, 0.9));
+    const s = new THREE.Mesh(vgeo, vm);
+    s.position.copy(p); s.scale.setScalar(rr(0.12, 0.2));
+    add('vesicle', s); vps.push(p);
+  }
+  // ER → Golgi vesicles on the cis side
+  for (let i = 0; i < 8; i++) {
+    const p = G.clone().addScaledVector(awayFromNucleus, -rr(1.3, 1.6)).addScaledVector(side, rr(-1.4, 1.4)).addScaledVector(up, rr(-0.7, 0.7));
+    if (p.distanceTo(N) < 4.9) continue;
+    const s = new THREE.Mesh(vgeo, vm);
+    s.position.copy(p); s.scale.setScalar(rr(0.1, 0.15));
+    add('vesicle', s);
+  }
+  function spawn(m, t0 = 0) {
+    for (let k = 0; k < 50; k++) {
+      const from = G.clone().addScaledVector(awayFromNucleus, 1.2).addScaledVector(side, rr(-1.2, 1.2)).addScaledVector(up, rr(-0.6, 0.6));
+      const to = awayFromNucleus.clone().add(randDir().multiplyScalar(0.95)).normalize().multiplyScalar(R - 0.45);
+      if (segDist(from, to, N) < 5) continue;
+      Object.assign(m.userData, { from, to, t: t0, speed: rr(0.05, 0.1), size: rr(0.14, 0.2) });
+      return;
+    }
+  }
+  for (let i = 0; i < 10; i++) {
+    const s = new THREE.Mesh(vgeo, vm);
+    spawn(s, rand());
+    s.userData.respawn = spawn;
+    add('vesicle', s); movers.push(s);
+  }
+  reg.vesicle.anchor.copy(bestFacing(vps)).add(V(0, 0.35, 0));
+}
+
+// ---------------------------------------------------------------- cytosol haze (decorative, not pickable)
+{
+  const n = 2600, pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const p = randDir().multiplyScalar(Math.cbrt(rand()) * (R - 0.4));
+    pos.set([p.x, p.y, p.z], i * 3);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const pts = new THREE.Points(g, new THREE.PointsMaterial({ color: 0x9fc5ff, size: 0.045, transparent: true, opacity: 0.35, depthWrite: false }));
+  cell.add(pts);
+}
+
+applyCut(true);
+
+// ---------------------------------------------------------------- UI: list
+const listEl = document.getElementById('list');
+const infoEl = document.getElementById('info');
+const rows = {};
+listEl.innerHTML = '<h2>Structures</h2>';
+for (const k of KEYS) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.style.setProperty('--c', ORG[k].color);
+  row.innerHTML = `<button class="name"><span class="dot"></span><span>${ORG[k].name}</span></button><button class="eye" title="Show / hide" aria-label="Toggle ${ORG[k].name}">◉</button>`;
+  row.querySelector('.name').addEventListener('click', () => { select(k); if (innerWidth <= 820) listEl.classList.remove('open'); });
+  row.querySelector('.name').addEventListener('mouseenter', () => { listHover = k; refreshHighlight(); });
+  row.querySelector('.name').addEventListener('mouseleave', () => { listHover = null; refreshHighlight(); });
+  row.querySelector('.eye').addEventListener('click', () => setVisible(k, !reg[k].visible));
+  listEl.appendChild(row);
+  rows[k] = row;
+}
+const foot = document.createElement('div');
+foot.className = 'foot';
+foot.innerHTML = '<button class="btn" id="showAll">Show all</button><button class="btn" id="hideShell">Hide membrane</button>';
+listEl.appendChild(foot);
+document.getElementById('showAll').onclick = () => { isolated = null; KEYS.forEach(k => setVisible(k, true)); renderInfo(); };
+document.getElementById('hideShell').onclick = () => setVisible('membrane', !reg.membrane.visible);
+
+function setVisible(k, v) {
+  reg[k].visible = v;
+  reg[k].objects.forEach(o => { o.visible = v; });
+  rows[k].classList.toggle('hidden', !v);
+  rows[k].querySelector('.eye').textContent = v ? '◉' : '○';
+  if (k === 'membrane') document.getElementById('hideShell').textContent = v ? 'Hide membrane' : 'Show membrane';
+  labelEls[k] && (labelEls[k].style.display = v && labelsOn ? '' : 'none');
+}
+
+// ---------------------------------------------------------------- UI: info panel
+let selected = null, hovered = null, listHover = null, isolated = null;
+function renderInfo() {
+  if (!selected) {
+    infoEl.classList.add('empty');
+    infoEl.innerHTML = `
+      <div class="kicker">Getting started</div>
+      <h2>Explore the cell</h2>
+      <p class="hint">This is a eukaryotic <b>animal cell</b> with a wedge cut away so you can see inside.</p>
+      <ul class="hint">
+        <li>Click any structure — or a name in the list — to fly to it and read about it.</li>
+        <li>Use ◉ to hide layers, or <b>Isolate</b> one structure.</li>
+        <li>Turn on <b>Labels</b>, or test yourself with <b>Quiz me</b>.</li>
+        <li><kbd>Esc</kbd> clears the selection.</li>
+      </ul>`;
+    return;
+  }
+  const o = ORG[selected];
+  infoEl.classList.remove('empty');
+  infoEl.innerHTML = `
+    <div class="kicker"><span class="dot" style="background:${o.color}"></span>${o.group}</div>
+    <h2>${o.name}</h2>
+    <p class="size">${o.size}</p>
+    <p>${o.desc}</p>
+    <h3>Did you know?</h3>
+    <ul>${o.facts.map(f => `<li>${f}</li>`).join('')}</ul>
+    <div class="actions">
+      <button class="btn primary" id="isoBtn">${isolated === selected ? 'Show everything' : 'Isolate'}</button>
+      <button class="btn" id="closeBtn">Close</button>
+    </div>`;
+  document.getElementById('isoBtn').onclick = () => {
+    if (isolated === selected) { isolated = null; KEYS.forEach(k => setVisible(k, true)); }
+    else { isolated = selected; KEYS.forEach(k => setVisible(k, k === selected)); }
+    renderInfo();
+  };
+  document.getElementById('closeBtn').onclick = () => select(null);
+}
+
+function select(k, point) {
+  selected = k;
+  KEYS.forEach(x => rows[x].classList.toggle('active', x === k));
+  refreshHighlight();
+  renderInfo();
+  if (!k) return;
+  if (!reg[k].visible) setVisible(k, true);
+  if (k === 'membrane') flyTo(HOME_TARGET, HOME_POS.clone().setLength(ORG.membrane.focus));
+  else flyToward(point || reg[k].anchor, ORG[k].focus);
+}
+
+// ---------------------------------------------------------------- highlighting
+function refreshHighlight() {
+  for (const k of KEYS) {
+    const lvl = (k === hovered || k === listHover) ? 0.55 : (k === selected ? 0.3 : 0);
+    const col = new THREE.Color(ORG[k].color);
+    for (const m of reg[k].materials) {
+      if (lvl) { m.emissive.copy(col); m.emissiveIntensity = lvl; }
+      else { m.emissive.copy(m.userData.baseEmissive); m.emissiveIntensity = m.userData.baseEI; }
+    }
+  }
+}
+
+// ---------------------------------------------------------------- camera flights
+let flight = null;
+function flyTo(target, pos, dur = 1.0) {
+  flight = { t: 0, dur, t0: controls.target.clone(), t1: target.clone(), p0: camera.position.clone(), p1: pos.clone() };
+  controls.autoRotate = false;
+}
+function flyToward(point, dist) {
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  flyTo(point, point.clone().addScaledVector(dir, dist));
+}
+const ease = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+// ---------------------------------------------------------------- picking
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const pickables = KEYS.flatMap(k => reg[k].objects);
+const tooltip = document.getElementById('tooltip');
+function isShown(o) { while (o) { if (!o.visible) return false; o = o.parent; } return true; }
+function pick(cx, cy) {
+  const r = renderer.domElement.getBoundingClientRect();
+  pointer.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(pickables, true).filter(h => h.object.userData.key && isShown(h.object));
+  if (!hits.length) return null;
+  return hits.find(h => h.object.userData.key !== 'membrane') || hits[0];
+}
+let hoverXY = null, down = null;
+renderer.domElement.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') hoverXY = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerleave', () => { hoverXY = null; setHover(null); });
+renderer.domElement.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; controls.autoRotate = false; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6) return;
+  const h = pick(e.clientX, e.clientY);
+  const k = h ? h.object.userData.key : null;
+  if (quiz) { if (k) answerQuiz(k, h.point); return; }
+  if (k) select(k, h.point); else select(null);
+});
+function setHover(k, x, y) {
+  if (k !== hovered) { hovered = k; refreshHighlight(); }
+  renderer.domElement.style.cursor = k ? 'pointer' : 'grab';
+  if (k && !quiz) {
+    tooltip.textContent = ORG[k].name;
+    tooltip.style.left = (x + 14) + 'px';
+    tooltip.style.top = (y + 14) + 'px';
+    tooltip.style.opacity = 1;
+  } else tooltip.style.opacity = 0;
+}
+addEventListener('keydown', e => { if (e.key === 'Escape') select(null); });
+
+// ---------------------------------------------------------------- labels
+const labelsEl = document.getElementById('labels');
+const labelEls = {};
+let labelsOn = false;
+for (const k of KEYS) {
+  const d = document.createElement('div');
+  d.className = 'label';
+  d.style.setProperty('--c', ORG[k].color);
+  d.textContent = ORG[k].name;
+  d.style.display = 'none';
+  labelsEl.appendChild(d);
+  labelEls[k] = d;
+}
+const projV = V();
+function updateLabels() {
+  if (!labelsOn) return;
+  for (const k of KEYS) {
+    const el = labelEls[k];
+    if (!reg[k].visible) { el.style.display = 'none'; continue; }
+    projV.copy(reg[k].anchor).project(camera);
+    if (projV.z > 1 || Math.abs(projV.x) > 1.1 || Math.abs(projV.y) > 1.1) { el.style.display = 'none'; continue; }
+    el.style.display = '';
+    el.style.left = ((projV.x + 1) / 2 * innerWidth) + 'px';
+    el.style.top = ((1 - projV.y) / 2 * innerHeight) + 'px';
+  }
+}
+
+// ---------------------------------------------------------------- toolbar
+const btn = id => document.getElementById(id);
+const toggle = (b, v) => b.setAttribute('aria-pressed', String(v));
+let cutOn = true, motionOn = true;
+btn('btnCut').onclick = () => { cutOn = !cutOn; applyCut(cutOn); toggle(btn('btnCut'), cutOn); };
+btn('btnLabels').onclick = () => {
+  labelsOn = !labelsOn; toggle(btn('btnLabels'), labelsOn);
+  if (!labelsOn) KEYS.forEach(k => { labelEls[k].style.display = 'none'; });
+};
+btn('btnMotion').onclick = () => { motionOn = !motionOn; toggle(btn('btnMotion'), motionOn); };
+btn('btnReset').onclick = () => { select(null); flyTo(HOME_TARGET, HOME_POS); };
+btn('toggleList').onclick = () => listEl.classList.toggle('open');
+
+// ---------------------------------------------------------------- quiz
+const quizbar = btn('quizbar');
+let quiz = null;
+function startQuiz() {
+  isolated = null; KEYS.forEach(k => setVisible(k, true));
+  if (labelsOn) btn('btnLabels').click();
+  select(null);
+  quiz = { score: 0, total: 0, target: null, locked: false };
+  quizbar.classList.add('on');
+  btn('btnQuiz').textContent = 'Quiz on…';
+  nextQuestion();
+}
+function nextQuestion() {
+  const pool = KEYS.filter(k => k !== quiz.target);
+  quiz.target = pool[Math.floor(Math.random() * pool.length)];
+  quiz.locked = false;
+  quizbar.querySelector('.q').innerHTML = `Click the <b>${ORG[quiz.target].name}</b>`;
+  quizbar.querySelector('.fb').textContent = '';
+  quizbar.querySelector('.score').textContent = `${quiz.score} / ${quiz.total}`;
+}
+function answerQuiz(k, point) {
+  if (quiz.locked) return;
+  quiz.locked = true;
+  quiz.total++;
+  const fb = quizbar.querySelector('.fb');
+  if (k === quiz.target) { quiz.score++; fb.textContent = '✓ Correct!'; fb.className = 'fb good'; }
+  else { fb.textContent = `✗ That’s the ${ORG[k].name}`; fb.className = 'fb bad'; }
+  quizbar.querySelector('.score').textContent = `${quiz.score} / ${quiz.total}`;
+  hovered = k; refreshHighlight();
+  setTimeout(() => { hovered = null; refreshHighlight(); if (quiz) nextQuestion(); }, 1400);
+}
+function endQuiz() { quiz = null; quizbar.classList.remove('on'); btn('btnQuiz').textContent = 'Quiz me'; }
+btn('btnQuiz').onclick = () => quiz ? endQuiz() : startQuiz();
+btn('quizSkip').onclick = () => { if (quiz) { quiz.total++; nextQuestion(); } };
+btn('quizEnd').onclick = endQuiz;
+
+// ---------------------------------------------------------------- loop
+renderInfo();
+const clock = new THREE.Clock();
+let elapsed = 0;
+function tick() {
+  const rawDt = clock.getDelta(), dt = Math.min(rawDt, 0.05);
+  if (flight) {
+    flight.t += Math.min(rawDt, 0.25) / flight.dur;
+    const k = ease(Math.min(flight.t, 1));
+    controls.target.lerpVectors(flight.t0, flight.t1, k);
+    camera.position.lerpVectors(flight.p0, flight.p1, k);
+    if (flight.t >= 1) flight = null;
+  }
+  if (motionOn) {
+    elapsed += dt;
+    for (const m of mitos) m.rotateY(m.userData.spin * dt);
+    for (const d of drifters) {
+      const h = d.userData.home, ph = d.userData.ph;
+      d.position.set(h.x + Math.sin(elapsed * 0.5 + ph) * 0.12, h.y + Math.sin(elapsed * 0.4 + ph * 2) * 0.12, h.z + Math.cos(elapsed * 0.45 + ph) * 0.12);
+    }
+    for (const v of movers) {
+      const u = v.userData;
+      u.t += dt * u.speed;
+      if (u.t >= 1) u.respawn(v, 0);
+      v.position.lerpVectors(u.from, u.to, ease(u.t));
+      const grow = Math.min(1, u.t / 0.06), fuse = u.t > 0.92 ? Math.max(0, (1 - u.t) / 0.08) : 1;
+      v.scale.setScalar(Math.max(0.001, u.size * grow * fuse));
+    }
+    nuc.chromatin.rotation.y = Math.sin(elapsed * 0.2) * 0.05;
+  }
+  controls.update();
+  if (hoverXY) {
+    const h = pick(hoverXY[0], hoverXY[1]);
+    setHover(h ? h.object.userData.key : null, hoverXY[0], hoverXY[1]);
+    hoverXY = null;
+  }
+  renderer.render(scene, camera);
+  updateLabels();
+  requestAnimationFrame(tick);
+}
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+tick();
+document.getElementById('loading').classList.add('done');
+</script>
+<script>
+  // Friendly message if WebGL or the module CDN is unavailable
+  setTimeout(() => {
+    const l = document.getElementById('loading');
+    if (l && !l.classList.contains('done')) l.textContent = 'The 3D model could not load. It needs WebGL and an internet connection (three.js is loaded from cdn.jsdelivr.net).';
+  }, 8000);
+</script>
+</body>
+</html>
